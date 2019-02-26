@@ -2,9 +2,9 @@ module HuberLR
 
 export LinearRegression, fit!, predict
 
-using Optim
+using Optim, Printf
 
-type LinearRegression
+mutable struct LinearRegression
     δ::Float64
     w::Vector{Float64}
     function LinearRegression(δ)
@@ -18,7 +18,7 @@ end
 function Base.show(io::IO, lr::LinearRegression)
     print(io, "LinearRegression:\n")
     print(io, "    δ: $(lr.δ)\n")
-    ws = ASCIIString[]
+    ws = String[]
     for w in lr.w
         s = @sprintf "%.4f" w
         push!(ws, s)
@@ -26,7 +26,7 @@ function Base.show(io::IO, lr::LinearRegression)
     print(io, "    w: $(join(ws, ", "))")
 end
 
-immutable Data
+struct Data
     x::Matrix{Float64}
     y::Vector{Float64}
     function Data(x, y)
@@ -40,19 +40,19 @@ end
 Base.size(data::Data) = length(data.y)
 dim(data::Data) = size(data.x, 1)
 
-function fit!(lr::LinearRegression, x::Matrix{Float64}, y::Vector{Float64}; method=:l_bfgs, show_trace=false)
+function fit!(lr::LinearRegression, x::Matrix{Float64}, y::Vector{Float64}; method=LBFGS(), show_trace=false)
     D, N = size(x)
     x = vcat(ones(N)', x)
     w₀ = randn(D + 1)
     data = Data(x, y)
-    if method ∈ [:l_bfgs, :bfgs]
+    if isa(method, LBFGS) || isa(method, BFGS)
         opt = optimize(w -> loss(w, lr, data), (w, ∇) -> ∇loss!(w, ∇, lr, data), w₀, method=method, show_trace=show_trace)
-    elseif method ∈ [:nelder_mead]
+    elseif isa(method, NelderMead)
         opt = optimize(w -> loss(w, lr, data), w₀, method=method, show_trace=show_trace)
     else
         error("method $method is not supported")
     end
-    lr.w = opt.minimum
+    lr.w = Optim.minimizer(opt)
     lr
 end
 
@@ -61,9 +61,9 @@ function predict(lr::LinearRegression, x::Matrix{Float64})
     if isempty(lr.w)
         error("the model is not yet trained")
     elseif length(lr.w) != D + 1
-        error("dimention mismatch")
+        error("dimension mismatch")
     end
-    ŷ = Array(Float64, N)
+    ŷ = zeros(N)
     @inbounds for n in 1:N
         s = lr.w[1]
         for j in 1:D
@@ -96,7 +96,7 @@ function loss(w::Vector{Float64}, lr::LinearRegression, data::Data)
 end
 
 # first derivative of Huber loss function
-function ∇loss!(w::Vector{Float64}, ∇::Vector{Float64}, lr::LinearRegression, data::Data)
+function ∇loss!(∇::Vector{Float64}, w::Vector{Float64}, lr::LinearRegression, data::Data)
     N = size(data)
     D = dim(data)
     δ = lr.δ
